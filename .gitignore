@@ -1,0 +1,19 @@
+# 模型权重文件（大文件）
+*.pt
+
+# 前端依赖和构建目录
+frontend/node_modules/
+frontend/.next/
+frontend/.cache/
+
+# 数据集和训练数据（大文件）
+KITTI/
+labels_*/
+train/
+valid/
+video/
+
+# 缓存文件
+*.cache
+
+!/*/train/
