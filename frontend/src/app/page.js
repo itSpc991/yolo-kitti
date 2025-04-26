@@ -14,11 +14,14 @@ export default function Home() {
   const [preview, setPreview] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
     if (selectedFile) {
       setFile(selectedFile);
+      setError(null);
+      setResult(null);
       const reader = new FileReader();
       reader.onloadend = () => {
         setPreview(reader.result);
@@ -29,9 +32,13 @@ export default function Home() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!file) return;
+    if (!file) {
+      setError("请选择一个文件");
+      return;
+    }
 
     setIsProcessing(true);
+    setError(null);
     const formData = new FormData();
     formData.append("file", file);
 
@@ -42,14 +49,14 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        throw new Error("Processing failed");
+        throw new Error("处理失败，请重试");
       }
 
       const data = await response.json();
       setResult(data);
     } catch (error) {
       console.error("Error:", error);
-      alert("处理文件时出错");
+      setError(error.message || "处理文件时出错");
     } finally {
       setIsProcessing(false);
     }
@@ -66,19 +73,30 @@ export default function Home() {
               accept="image/*,video/*"
               onChange={handleFileChange}
               className={styles.fileInput}
+              disabled={isProcessing}
             />
             <button
               type="submit"
               disabled={!file || isProcessing}
               className={styles.submitButton}
             >
-              {isProcessing ? "处理中..." : "开始处理"}
+              {isProcessing ? (
+                <span className={styles.loading}>
+                  <span className={styles.loadingDot}></span>
+                  <span className={styles.loadingDot}></span>
+                  <span className={styles.loadingDot}></span>
+                </span>
+              ) : (
+                "开始处理"
+              )}
             </button>
+            {error && <p className={styles.error}>{error}</p>}
           </div>
         </form>
 
         {preview && (
           <div className={styles.previewContainer}>
+            <h2 className={styles.resultTitle}>预览</h2>
             {file.type.startsWith("image/") ? (
               <img src={preview} alt="预览" className={styles.preview} />
             ) : (
