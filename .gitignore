@@ -13,6 +13,7 @@ labels_*/
 train/
 valid/
 video/
+contrast/
 
 # 缓存文件
 *.cache

@@ -13,7 +13,7 @@ from yolox.tracker.byte_tracker import BYTETracker
 from yolox.tracking_utils.timer import Timer
 
 class ByteTrackWrapper:
-    def __init__(self, model_path, tracker_args=None):
+    def __init__(self, model_path, tracker_args=None, is_video=False):
         # 加载YOLO模型
         self.model = YOLO(model_path)
         
@@ -33,6 +33,103 @@ class ByteTrackWrapper:
         self.timer = Timer()
         self.frame_id = 0
         self.results = []
+        self.congestion_threshold = 0.3  # 拥挤度阈值，可以根据实际情况调整
+        self.is_video = is_video  # 保存是否为视频的标志
+        
+        # 添加字体路径
+        self.font_path = "/System/Library/Fonts/PingFang.ttc"  # macOS 系统中文字体
+        
+    def put_chinese_text(self, img, text, position, color):
+        """
+        在图片上显示中文
+        
+        Args:
+            img: 图片
+            text: 要显示的文本
+            position: 位置，元组 (x, y)
+            color: 颜色，元组 (B, G, R)
+        """
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            
+            # 将OpenCV图片转换为PIL图片
+            img_pil = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            draw = ImageDraw.Draw(img_pil)
+            
+            # 加载字体，大小为30
+            try:
+                font = ImageFont.truetype(self.font_path, 30)
+            except Exception as e:
+                print(f"无法加载字体 {self.font_path}，尝试使用默认字体")
+                # 尝试使用其他常见的中文字体路径
+                font_paths = [
+                    "/System/Library/Fonts/STHeiti Light.ttc",  # macOS另一个中文字体
+                    "/System/Library/Fonts/STHeiti Medium.ttc",
+                    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                    "/System/Library/Fonts/Apple LiGothic Medium.ttf"
+                ]
+                
+                for path in font_paths:
+                    try:
+                        font = ImageFont.truetype(path, 30)
+                        self.font_path = path  # 更新为可用的字体路径
+                        break
+                    except:
+                        continue
+                else:
+                    # 如果所有字体都失败，使用默认字体
+                    font = ImageFont.load_default()
+            
+            # 在PIL图片上绘制文字
+            draw.text(position, text, font=font, fill=color[::-1])  # PIL使用RGB而CV2使用BGR，所以需要反转颜色
+            
+            # 将PIL图片转回OpenCV格式
+            img_opencv = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+            
+            # 只复制文字区域
+            rows, cols = img.shape[:2]
+            roi = img_opencv[0:rows, 0:cols]
+            img[0:rows, 0:cols] = roi
+            
+        except Exception as e:
+            print(f"显示中文文本时出错: {str(e)}")
+            # 如果显示中文失败，回退到英文显示
+            # 将中文转换为英文显示
+            english_text = text.replace("路段拥挤!", "Road Congested!").replace("路段正常", "Road Normal").replace("拥挤度", "Congestion")
+            cv2.putText(img, english_text, position, cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+    
+    def check_congestion(self, boxes, frame_shape):
+        """
+        检查路段拥挤程度
+        
+        Args:
+            boxes: 检测框列表
+            frame_shape: 图像尺寸
+        
+        Returns:
+            is_congested: 是否拥挤
+            congestion_ratio: 拥挤度
+        """
+        if len(boxes) == 0:
+            return False, 0.0
+            
+        # 计算所有检测框的面积总和
+        total_box_area = 0
+        for box in boxes:
+            w = box[2] - box[0]
+            h = box[3] - box[1]
+            total_box_area += w * h
+            
+        # 计算图像总面积
+        frame_area = frame_shape[0] * frame_shape[1]
+        
+        # 计算拥挤度（检测框面积占比）
+        congestion_ratio = total_box_area / frame_area
+        
+        # 判断是否拥挤
+        is_congested = congestion_ratio > self.congestion_threshold
+        
+        return is_congested, congestion_ratio
         
     def update(self, frame):
         # 使用YOLO进行目标检测
@@ -67,6 +164,26 @@ class ByteTrackWrapper:
                 print(f"追踪结果: {len(online_targets)} 个目标")
         
         # 绘制结果
+        # 只在视频处理时添加拥挤度检测
+        if self.is_video and len(online_targets) > 0:
+            # 收集所有追踪目标的边界框
+            boxes = []
+            for t in online_targets:
+                tlwh = t.tlwh
+                x1, y1 = tlwh[0], tlwh[1]
+                x2, y2 = x1 + tlwh[2], y1 + tlwh[3]
+                boxes.append([x1, y1, x2, y2])
+            
+            # 检查拥挤度
+            is_congested, congestion_ratio = self.check_congestion(boxes, frame.shape)
+            
+            # 在画面上显示拥挤状态
+            status_text = "路段拥挤!" if is_congested else "路段正常"
+            color = (0, 0, 255) if is_congested else (0, 255, 0)
+            self.put_chinese_text(frame, f"{status_text} (拥挤度: {congestion_ratio:.2%})", 
+                                (10, 30), color)
+        
+        # 绘制追踪结果
         self.frame_id += 1
         for t in online_targets:
             tlwh = t.tlwh
@@ -94,7 +211,7 @@ def process_image(input_path, output_path, model_path="./yolo11n-kitti/train/wei
     print(f"输出路径: {output_path}")
     
     # 初始化追踪器
-    tracker = ByteTrackWrapper(model_path)
+    tracker = ByteTrackWrapper(model_path, is_video=False)
     
     # 读取图片
     frame = cv2.imread(input_path)
@@ -104,7 +221,7 @@ def process_image(input_path, output_path, model_path="./yolo11n-kitti/train/wei
     
     # 处理图片
     try:
-        # 更新追踪器
+        # 更新追踪器，不传入 is_video 参数
         result_frame = tracker.update(frame)
         
         # 保存结果
@@ -144,7 +261,7 @@ def process_video(input_path, output_path, model_path="yolo11n.pt"):
     print(f"输出路径: {output_path}")
     
     # 初始化追踪器
-    tracker = ByteTrackWrapper(model_path)
+    tracker = ByteTrackWrapper(model_path, is_video=True)
     
     # 打开视频文件
     cap = cv2.VideoCapture(input_path)
@@ -193,8 +310,8 @@ def process_video(input_path, output_path, model_path="yolo11n.pt"):
             frame_count += 1
             print(f"\n处理第 {frame_count}/{total_frames} 帧")
             
-            # 更新追踪器
-            result_frame = tracker.update(frame)
+            # 更新追踪器，显示拥挤状态
+            result_frame = tracker.update(frame)  # 正确的调用方式
             
             # 写入结果
             out.write(result_frame)

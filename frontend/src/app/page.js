@@ -65,7 +65,7 @@ export default function Home() {
   return (
     <div className={`${styles.page} ${inter.className}`}>
       <main className={styles.main}>
-        <h1 className={styles.title}>自动驾驶智能感知模块</h1>
+        <h1 className={styles.title}>智能车辆视觉感知系统</h1>
         <form onSubmit={handleSubmit} className={styles.form}>
           <div className={styles.uploadContainer}>
             <input
